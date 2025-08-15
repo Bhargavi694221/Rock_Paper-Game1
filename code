@@ -1,0 +1,113 @@
+import cv2
+import mediapipe as mp
+import numpy as np
+import random
+from IPython.display import display, Javascript, clear_output
+from google.colab.output import eval_js
+import base64
+
+# Webcam capture
+def take_photo(filename='photo.jpg', quality=0.8):
+    js = Javascript('''
+    async function takePhoto(quality) {
+      const div = document.createElement('div');
+      const capture = document.createElement('button');
+      capture.textContent = 'Capture';
+      div.appendChild(capture);
+      document.body.appendChild(div);
+      const video = document.createElement('video');
+      video.style.display = 'block';
+      document.body.appendChild(video);
+      const stream = await navigator.mediaDevices.getUserMedia({video: true});
+      video.srcObject = stream;
+      await video.play();
+      google.colab.output.setIframeHeight(document.documentElement.scrollHeight, true);
+      await new Promise((resolve) => capture.onclick = resolve);
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      stream.getVideoTracks()[0].stop();
+      div.remove();
+      video.remove();
+      return canvas.toDataURL('image/jpeg', quality);
+    }
+    ''')
+    display(js)
+    data = eval_js('takePhoto({})'.format(quality))
+    binary = base64.b64decode(data.split(',')[1])
+    with open(filename, 'wb') as f:
+        f.write(binary)
+    return filename
+
+# Finger counting function (same as before)
+def fingers_up(hand_landmarks):
+    tips = [4,8,12,16,20]
+    fingers = []
+    if hand_landmarks.landmark[tips[0]].x < hand_landmarks.landmark[tips[0]-1].x:
+        fingers.append(1)
+    else:
+        fingers.append(0)
+    for id in range(1,5):
+        if hand_landmarks.landmark[tips[id]].y < hand_landmarks.landmark[tips[id]-2].y:
+            fingers.append(1)
+        else:
+            fingers.append(0)
+    return fingers
+
+# Recognize gesture as Rock/Paper/Scissors/Unknown
+def recognize_rps_gesture(fingers):
+    if fingers == [0,0,0,0,0]:
+        return 'Rock'
+    elif fingers == [1,1,1,1,1]:
+        return 'Paper'
+    elif fingers == [0,1,1,0,0]:
+        return 'Scissors'
+    else:
+        return 'Unknown'
+
+# Decide winner
+def decide_winner(user, computer):
+    if user == computer:
+        return "It's a Tie!"
+    elif (user == 'Rock' and computer == 'Scissors') or \
+         (user == 'Paper' and computer == 'Rock') or \
+         (user == 'Scissors' and computer == 'Paper'):
+        return "You Win!"
+    elif user == 'Unknown':
+        return "Couldn't recognize your gesture."
+    else:
+        return "Computer Wins!"
+
+# Main game code
+filename = take_photo()
+img = cv2.imread(filename)
+
+mp_hands = mp.solutions.hands
+mp_drawing = mp.solutions.drawing_utils
+
+with mp_hands.Hands(static_image_mode=True, max_num_hands=1, min_detection_confidence=0.5) as hands:
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    results = hands.process(img_rgb)
+
+    user_move = 'Unknown'
+    if results.multi_hand_landmarks:
+        hand_landmarks = results.multi_hand_landmarks[0]
+        fingers = fingers_up(hand_landmarks)
+        user_move = recognize_rps_gesture(fingers)
+        mp_drawing.draw_landmarks(img, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+    else:
+        user_move = 'No hand detected'
+
+computer_move = random.choice(['Rock','Paper','Scissors'])
+result = decide_winner(user_move, computer_move)
+
+cv2.putText(img, f'Your move: {user_move}', (10,30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+cv2.putText(img, f'Computer: {computer_move}', (10,70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
+cv2.putText(img, f'Result: {result}', (10,110), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,0), 2)
+
+from google.colab.patches import cv2_imshow
+clear_output()
+cv2_imshow(img)
+cv2.waitKey(0)
+cv2.destroyAllWindows()
